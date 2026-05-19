@@ -68,9 +68,12 @@ def _fetch_railway():
                     if sid not in existing_ids:
                         # Derive actual session time from sessionId (unix timestamp)
                         try:
-                            ts_dt = datetime.fromtimestamp(int(sess["sessionId"]) / 1000
-                                        if int(sess["sessionId"]) > 1e12
-                                        else int(sess["sessionId"]))
+                            from datetime import timezone, timedelta
+                            TZ_BKK = timezone(timedelta(hours=7))
+                            ts_s = int(sess["sessionId"]) / 1000 \
+                                   if int(sess["sessionId"]) > 1e12 \
+                                   else int(sess["sessionId"])
+                            ts_dt = datetime.fromtimestamp(ts_s, tz=TZ_BKK)
                             start_str = ts_dt.strftime("%Y-%m-%d %H:%M:%S")
                         except Exception:
                             start_str = (sess.get("uploadedAt") or "")[:19].replace("T", " ")
