@@ -61,10 +61,17 @@ def _fetch_railway():
             railway_ok[0] = True
 
             with lock:
-                existing_ids = {s["id"] for s in pending}
+                existing_ids = {s["id"]: i for i, s in enumerate(pending)}
                 for sess in data:
                     sid = sess["id"]
                     sessions_cache[sid] = sess
+                    # Always refresh metadata for existing entries (activity/weight/waste may arrive later)
+                    if sid in existing_ids:
+                        idx = existing_ids[sid]
+                        pending[idx]["activity"] = sess.get("activity")
+                        pending[idx]["weight_g"] = round(sess["weight_g"], 1) if sess.get("weight_g") is not None else None
+                        pending[idx]["waste_g"]  = round(sess["waste_g"],  1) if sess.get("waste_g")  is not None else None
+                        pending[idx]["peak"]     = round(sess.get("peakTotal_g", 0), 1)
                     if sid not in existing_ids:
                         # Derive actual session time from sessionId (unix timestamp)
                         try:
