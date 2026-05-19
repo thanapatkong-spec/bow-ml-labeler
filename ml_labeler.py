@@ -65,13 +65,17 @@ def _fetch_railway():
                 for sess in data:
                     sid = sess["id"]
                     sessions_cache[sid] = sess
-                    # Always refresh metadata for existing entries (activity/weight/waste may arrive later)
+                    # Always refresh metadata for existing entries (may arrive after first fetch)
                     if sid in existing_ids:
                         idx = existing_ids[sid]
-                        pending[idx]["activity"] = sess.get("activity")
-                        pending[idx]["weight_g"] = round(sess["weight_g"], 1) if sess.get("weight_g") is not None else None
-                        pending[idx]["waste_g"]  = round(sess["waste_g"],  1) if sess.get("waste_g")  is not None else None
-                        pending[idx]["peak"]     = round(sess.get("peakTotal_g", 0), 1)
+                        pending[idx]["activity"]        = sess.get("activity")
+                        pending[idx]["weight_g"]        = round(sess["weight_g"],        1) if sess.get("weight_g")        is not None else None
+                        pending[idx]["waste_g"]         = round(sess["waste_g"],         1) if sess.get("waste_g")         is not None else None
+                        pending[idx]["peak"]            = round(sess.get("peakTotal_g",  0), 1)
+                        pending[idx]["catWeight_g"]     = round(sess["catWeight_g"],     1) if sess.get("catWeight_g")     is not None else None
+                        pending[idx]["foodConsumed_g"]  = round(sess["foodConsumed_g"],  1) if sess.get("foodConsumed_g")  is not None else None
+                        pending[idx]["waterFromFood_g"] = round(sess["waterFromFood_g"], 1) if sess.get("waterFromFood_g") is not None else None
+                        pending[idx]["foodProfile"]     = sess.get("foodProfile")
                     if sid not in existing_ids:
                         # Derive actual session time from sessionId (unix timestamp)
                         try:
@@ -86,19 +90,25 @@ def _fetch_railway():
                             start_str = (sess.get("uploadedAt") or "")[:19].replace("T", " ")
 
                         pending.append({
-                            "id":         sid,
-                            "sessionId":  sess["sessionId"],
-                            "catId":      sess.get("catId"),
-                            "padType":    sess.get("padType", "bow"),
-                            "device":     sess.get("padType", "bow"),
-                            "start":      start_str,
-                            "uploadedAt": (sess.get("uploadedAt") or "")[:19].replace("T", " "),
-                            "durationMs": sess.get("durationMs", 0),
-                            "pointCount": sess.get("pointCount", 0),
-                            "peak":       round(sess.get("peakTotal_g", 0), 1),
-                            "activity":   sess.get("activity"),
-                            "weight_g":   round(sess["weight_g"], 1) if sess.get("weight_g") is not None else None,
-                            "waste_g":    round(sess["waste_g"],  1) if sess.get("waste_g")  is not None else None,
+                            "id":              sid,
+                            "sessionId":       sess["sessionId"],
+                            "catId":           sess.get("catId"),
+                            "padType":         sess.get("padType", "bow"),
+                            "device":          sess.get("padType", "bow"),
+                            "start":           start_str,
+                            "uploadedAt":      (sess.get("uploadedAt") or "")[:19].replace("T", " "),
+                            "durationMs":      sess.get("durationMs", 0),
+                            "pointCount":      sess.get("pointCount", 0),
+                            "peak":            round(sess.get("peakTotal_g", 0), 1),
+                            # Bow pad metadata
+                            "activity":        sess.get("activity"),
+                            "weight_g":        round(sess["weight_g"],        1) if sess.get("weight_g")        is not None else None,
+                            "waste_g":         round(sess["waste_g"],         1) if sess.get("waste_g")         is not None else None,
+                            # Food pad metadata
+                            "catWeight_g":     round(sess["catWeight_g"],     1) if sess.get("catWeight_g")     is not None else None,
+                            "foodConsumed_g":  round(sess["foodConsumed_g"],  1) if sess.get("foodConsumed_g")  is not None else None,
+                            "waterFromFood_g": round(sess["waterFromFood_g"], 1) if sess.get("waterFromFood_g") is not None else None,
+                            "foodProfile":     sess.get("foodProfile"),
                         })
         except Exception as e:
             railway_ok[0] = False
@@ -530,12 +540,20 @@ function sessCard(s){
   const section = isBow ? bowSection : isFood ? foodSection : waterSection;
   const sessClass = isBow ? '' : isFood ? ' food-sess' : ' water-sess';
 
-  // Activity / weight / waste / sessionId meta line
+  // Activity / metadata / sessionId meta line
   let extraMeta = '';
   if (s.activity) {
     extraMeta += `<span style="color:#aaa">🏷 ${s.activity}</span>`;
-    if (s.weight_g != null && s.weight_g > 0) extraMeta += ` &nbsp;·&nbsp; <span style="color:#81c784">🐱 ${s.weight_g}g</span>`;
-    if (s.waste_g  != null && s.waste_g  > 0) extraMeta += ` &nbsp;·&nbsp; <span style="color:#ffb74d">💩 ${s.waste_g}g</span>`;
+    if (isBow) {
+      if (s.weight_g != null && s.weight_g > 0) extraMeta += ` &nbsp;·&nbsp; <span style="color:#81c784">🐱 ${s.weight_g}g</span>`;
+      if (s.waste_g  != null && s.waste_g  > 0) extraMeta += ` &nbsp;·&nbsp; <span style="color:#ffb74d">💩 ${s.waste_g}g</span>`;
+    }
+    if (isFood) {
+      if (s.catWeight_g    != null && s.catWeight_g    > 0) extraMeta += ` &nbsp;·&nbsp; <span style="color:#81c784">🐱 ${s.catWeight_g}g</span>`;
+      if (s.foodConsumed_g != null && s.foodConsumed_g > 0) extraMeta += ` &nbsp;·&nbsp; <span style="color:#a5d6a7">🍽 ${s.foodConsumed_g}g</span>`;
+      if (s.waterFromFood_g!= null && s.waterFromFood_g> 0) extraMeta += ` &nbsp;·&nbsp; <span style="color:#80deea">💧 ${s.waterFromFood_g}g</span>`;
+      if (s.foodProfile)                                     extraMeta += ` &nbsp;·&nbsp; <span style="color:#ffcc80">📦 ${s.foodProfile}</span>`;
+    }
   }
   if (s.sessionId) extraMeta += `${extraMeta?' &nbsp;·&nbsp; ':''}<span style="color:#555;font-size:.72em">SID:${s.sessionId}</span>`;
 
