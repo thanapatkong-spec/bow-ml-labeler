@@ -89,6 +89,9 @@ def _fetch_railway():
                             "durationMs": sess.get("durationMs", 0),
                             "pointCount": sess.get("pointCount", 0),
                             "peak":       round(sess.get("peakTotal_g", 0), 1),
+                            "activity":   sess.get("activity"),
+                            "weight_g":   round(sess["weight_g"], 1) if sess.get("weight_g") is not None else None,
+                            "waste_g":    round(sess["waste_g"],  1) if sess.get("waste_g")  is not None else None,
                         })
         except Exception as e:
             railway_ok[0] = False
@@ -520,11 +523,21 @@ function sessCard(s){
   const section = isBow ? bowSection : isFood ? foodSection : waterSection;
   const sessClass = isBow ? '' : isFood ? ' food-sess' : ' water-sess';
 
+  // Activity / weight / waste / sessionId meta line
+  let extraMeta = '';
+  if (s.activity) {
+    extraMeta += `<span style="color:#aaa">🏷 ${s.activity}</span>`;
+    if (s.weight_g != null && s.weight_g > 0) extraMeta += ` &nbsp;·&nbsp; <span style="color:#81c784">🐱 ${s.weight_g}g</span>`;
+    if (s.waste_g  != null && s.waste_g  > 0) extraMeta += ` &nbsp;·&nbsp; <span style="color:#ffb74d">💩 ${s.waste_g}g</span>`;
+  }
+  if (s.sessionId) extraMeta += `${extraMeta?' &nbsp;·&nbsp; ':''}<span style="color:#555;font-size:.72em">SID:${s.sessionId}</span>`;
+
   return `<div class="sess${sessClass}" id="s${id}">
     <div class="meta">
       <span class="time">${timeStr}</span>&nbsp;${tag}&nbsp;
       <span class="info">${dateStr} &nbsp;·&nbsp; ${dur_s}s &nbsp;·&nbsp; ${peakLabel} &nbsp;·&nbsp; ${s.pointCount||0}pts${s.catId?` &nbsp;·&nbsp; cat#${s.catId}`:''}</span>
     </div>
+    ${extraMeta ? `<div style="font-size:.78em;margin:4px 0 6px;line-height:1.6">${extraMeta}</div>` : ''}
     ${section}
     <input class="note-input" id="note${id}" placeholder="notes (optional)">
     <div class="row-btns">
