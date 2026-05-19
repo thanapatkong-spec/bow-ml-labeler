@@ -620,10 +620,12 @@ poll(); setInterval(poll,2000);
 </body>
 </html>"""
 
+# ── Start background poller (runs under both gunicorn and direct python) ──────
+print(f"[CONFIG] Railway URL: {RAILWAY_URL}")
+threading.Thread(target=_fetch_railway, daemon=True).start()
+
 # ── main ──────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    print(f"[CONFIG] Railway URL: {RAILWAY_URL}")
-    threading.Thread(target=_fetch_railway, daemon=True).start()
     print(f"[WEB] http://localhost:{HTTP_PORT}")
     app.run(host="0.0.0.0", port=HTTP_PORT, debug=False, use_reloader=False)
