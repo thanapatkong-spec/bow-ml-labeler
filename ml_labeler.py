@@ -589,7 +589,7 @@ function sessCard(s){
     <div class="row-btns">
       <button class="b-view" onclick="viewSession(${id},'${pad}','${timeStr}')">📊 View</button>
       <button class="b-skip" onclick="skip(${id})">skip</button>
-      <button class="b-del"  onclick="deleteSess(${id})">🗑</button>
+      <button class="b-del"  onclick="deleteSess(${id})" title="Mark as HW_ERROR (hardware drift / false trigger)">⚠️ Error</button>
     </div>
   </div>`;
 }
@@ -620,12 +620,7 @@ function skip(id){
     });
 }
 function deleteSess(id){
-  if(!confirm('ลบ session นี้ออกจาก DB ถาวร?')) return;
-  fetch('/api/delete',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({id})}).then(r=>r.json()).then(d=>{
-      if(d.ok){ lastPendCount=-1; document.getElementById('s'+id)?.remove(); }
-      else alert('Error: '+d.error);
-    });
+  _save(id, 'HW_ERROR', '', 'hardware drift / false trigger');
 }
 
 function viewSession(id, pad, timeStr){
