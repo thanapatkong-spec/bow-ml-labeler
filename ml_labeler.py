@@ -180,6 +180,26 @@ def api_skip():
         sessions_cache.pop(sess_id, None)
     return jsonify({"ok": True})
 
+@app.route("/api/delete", methods=["POST"])
+@require_auth
+def api_delete():
+    sess_id = (request.json or {}).get("id")
+    try:
+        r = requests.delete(
+            f"{RAILWAY_URL}/api/sense-pad/raw-sessions/{sess_id}",
+            timeout=10,
+        )
+        if r.status_code not in (200, 404):
+            return jsonify({"ok": False, "error": r.text}), r.status_code
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    with lock:
+        pending[:] = [s for s in pending if s["id"] != sess_id]
+        sessions_cache.pop(sess_id, None)
+    print(f"[DELETE] id={sess_id}")
+    return jsonify({"ok": True})
+
 @app.route("/api/session_data")
 @require_auth
 def api_session_data():
@@ -296,6 +316,7 @@ button:hover{opacity:.85;transform:translateY(-1px)}
 .b-lng {background:#0d3050;color:#80deea;padding:6px 12px}
 .b-shrt{background:#1e2a1e;color:#a5d6a7;padding:6px 12px}
 .b-skip{background:#1a1a1a;color:#555;padding:4px 10px;font-size:.75em}
+.b-del {background:#2a1010;color:#ef5350;padding:4px 10px;font-size:.75em}
 .b-view{background:#1a301a;color:#66bb6a;padding:5px 10px}
 .beh-wrap{display:none;margin-top:8px}
 .beh-label{font-size:.72em;color:#555;margin-bottom:5px;text-transform:uppercase;letter-spacing:.05em}
@@ -568,6 +589,7 @@ function sessCard(s){
     <div class="row-btns">
       <button class="b-view" onclick="viewSession(${id},'${pad}','${timeStr}')">📊 View</button>
       <button class="b-skip" onclick="skip(${id})">skip</button>
+      <button class="b-del"  onclick="deleteSess(${id})">🗑</button>
     </div>
   </div>`;
 }
@@ -595,6 +617,14 @@ function skip(id){
     body:JSON.stringify({id})}).then(()=>{
       lastPendCount=-1;
       document.getElementById('s'+id)?.remove();
+    });
+}
+function deleteSess(id){
+  if(!confirm('ลบ session นี้ออกจาก DB ถาวร?')) return;
+  fetch('/api/delete',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({id})}).then(r=>r.json()).then(d=>{
+      if(d.ok){ lastPendCount=-1; document.getElementById('s'+id)?.remove(); }
+      else alert('Error: '+d.error);
     });
 }
 
