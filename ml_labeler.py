@@ -11,7 +11,7 @@ Usage:
 
 import json, os, threading, time
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from functools import wraps
 from flask import Flask, jsonify, request, Response
 
@@ -23,6 +23,8 @@ FETCH_LIMIT   = 100
 
 ACCESS_USER = os.environ.get("ACCESS_USER", "bow")
 ACCESS_PASS = os.environ.get("ACCESS_PASS", "")   # ถ้าไม่ set = ไม่มี auth (local mode)
+
+TZ_BKK = timezone(timedelta(hours=7))   # Bangkok UTC+7 — module-level constant
 
 app  = Flask(__name__)
 
@@ -76,11 +78,10 @@ def _fetch_railway():
                         pending[idx]["foodConsumed_g"]  = round(sess["foodConsumed_g"],  1) if sess.get("foodConsumed_g")  is not None else None
                         pending[idx]["waterFromFood_g"] = round(sess["waterFromFood_g"], 1) if sess.get("waterFromFood_g") is not None else None
                         pending[idx]["foodProfile"]     = sess.get("foodProfile")
+                        pending[idx]["sessionType"]     = sess.get("sessionType")
                     if sid not in existing_ids:
                         # Derive actual session time from sessionId (unix timestamp)
                         try:
-                            from datetime import timezone, timedelta
-                            TZ_BKK = timezone(timedelta(hours=7))
                             ts_s = int(sess["sessionId"]) / 1000 \
                                    if int(sess["sessionId"]) > 1e12 \
                                    else int(sess["sessionId"])
@@ -94,7 +95,6 @@ def _fetch_railway():
                             "sessionId":       sess["sessionId"],
                             "catId":           sess.get("catId"),
                             "padType":         sess.get("padType", "bow"),
-                            "device":          sess.get("padType", "bow"),
                             "start":           start_str,
                             "uploadedAt":      (sess.get("uploadedAt") or "")[:19].replace("T", " "),
                             "durationMs":      sess.get("durationMs", 0),
@@ -109,6 +109,7 @@ def _fetch_railway():
                             "foodConsumed_g":  round(sess["foodConsumed_g"],  1) if sess.get("foodConsumed_g")  is not None else None,
                             "waterFromFood_g": round(sess["waterFromFood_g"], 1) if sess.get("waterFromFood_g") is not None else None,
                             "foodProfile":     sess.get("foodProfile"),
+                            "sessionType":     sess.get("sessionType"),
                         })
         except Exception as e:
             railway_ok[0] = False
@@ -159,7 +160,7 @@ def api_label():
         sessions_cache.pop(sess_id, None)
         labeled.append({
             "id":         sess_id,
-            "device":     sess.get("device", "bow"),
+            "padType":    sess.get("padType", "bow"),
             "activity":   activity,
             "behavior":   behavior,
             "duration_s": round(sess.get("durationMs", 0) / 1000, 1),
@@ -168,36 +169,27 @@ def api_label():
         if len(labeled) > 50:
             labeled.pop(0)
 
-    print(f"[LABEL] {sess.get('device')} id={sess_id} {activity}/{behavior}")
+    print(f"[LABEL] {sess.get('padType')} id={sess_id} {activity}/{behavior}")
     return jsonify({"ok": True})
 
 @app.route("/api/skip", methods=["POST"])
 @require_auth
 def api_skip():
     sess_id = (request.json or {}).get("id")
-    with lock:
-        pending[:] = [s for s in pending if s["id"] != sess_id]
-        sessions_cache.pop(sess_id, None)
-    return jsonify({"ok": True})
 
-@app.route("/api/delete", methods=["POST"])
-@require_auth
-def api_delete():
-    sess_id = (request.json or {}).get("id")
+    # PATCH Railway → labeledBy='skipped' เพื่อไม่ให้ poll ดึงกลับมาใหม่
     try:
-        r = requests.delete(
-            f"{RAILWAY_URL}/api/sense-pad/raw-sessions/{sess_id}",
+        requests.patch(
+            f"{RAILWAY_URL}/api/sense-pad/raw-sessions/{sess_id}/label",
+            json={"labeledBy": "skipped"},
             timeout=10,
         )
-        if r.status_code not in (200, 404):
-            return jsonify({"ok": False, "error": r.text}), r.status_code
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        print(f"[SKIP] Railway patch error: {e}")
 
     with lock:
         pending[:] = [s for s in pending if s["id"] != sess_id]
         sessions_cache.pop(sess_id, None)
-    print(f"[DELETE] id={sess_id}")
     return jsonify({"ok": True})
 
 @app.route("/api/session_data")
@@ -297,16 +289,10 @@ button:hover{opacity:.85;transform:translateY(-1px)}
 .b-pb {background:#1a2010;color:#c5e1a5}
 .b-eat{background:#1b4d20;color:#c8f0cb}
 .b-snf{background:#1e2a1e;color:#81c784}
-.b-vis{background:#1e3040;color:#b3d9f5}
-.b-fx {background:#2a2a2a;color:#777}
 .b-ff {background:#2a1800;color:#ffcc80}
-.b-rb2{background:#2a1a1a;color:#ef9a9a}
-.b-pb2{background:#1a2010;color:#c5e1a5}
 .b-drk{background:#0a2535;color:#80deea}
 .b-snw{background:#0a1e22;color:#4dd0e1}
 .b-fw {background:#0a2020;color:#26c6da}
-.b-rw {background:#1a1a2a;color:#80cbc4}
-.b-pw {background:#0a1a0a;color:#80deea}
 .b-lick{background:#1a3a1a;color:#a5d6a7;padding:6px 12px}
 .b-bit {background:#2a2010;color:#ffcc80;padding:6px 12px}
 .b-chm {background:#3a1a0a;color:#ff8a65;padding:6px 12px}
@@ -406,7 +392,7 @@ function mkLine(id,ds){
 }
 const cW=mkLine('cW',[
   {label:'Total',data:[],borderColor:'#4fc3f7',borderWidth:1.5,pointRadius:0,tension:.2,fill:false},
-  {label:'Net',  data:[],borderColor:'#a5d6a7',borderWidth:1,  pointRadius:0,tension:.2,fill:false},
+  {label:'Net',  data:[],borderColor:'#a5d6a7',borderWidth:1,  pointRadius:0,tension:.2,fill:false,hidden:true},
 ]);
 const cC=mkLine('cC',[
   {label:'FL',data:[],borderColor:'#ef9a9a',borderWidth:1,pointRadius:0,tension:.2,fill:false},
@@ -428,23 +414,26 @@ function setChartSrc(src){
     document.getElementById('cCttl').textContent='Net / Base (g)';
     cC.data.datasets[0].label='Net'; cC.data.datasets[1].label='Base';
     cC.data.datasets[2].label='—';   cC.data.datasets[3].label='—';
+    cW.data.datasets[1].hidden=false; cW.data.datasets[1].label='Net';
   } else if(src==='water'){
     document.getElementById('cCttl').textContent='Water Weight (g)';
     cC.data.datasets[0].label='Level'; cC.data.datasets[1].label='—';
     cC.data.datasets[2].label='—';     cC.data.datasets[3].label='—';
+    cW.data.datasets[1].hidden=true;
   } else {
     document.getElementById('cCttl').textContent='Corner Load (g)';
     cC.data.datasets[0].label='FL'; cC.data.datasets[1].label='FR';
     cC.data.datasets[2].label='RL'; cC.data.datasets[3].label='RR';
+    cW.data.datasets[1].hidden=true;   // bow ส่ง net อยู่แล้ว ไม่มี second line
   }
-  cC.update('none');
+  cC.update('none'); cW.update('none');
 }
 
 function setChart(ch,pts,fns){
   const step=Math.max(1,Math.floor(pts.length/200));
   const sampled=pts.filter((_,i)=>i%step===0);
   ch.data.labels=sampled.map(p=>{const ms=p.t_ms||0;const s=Math.floor(ms/1000);return s+'s';});
-  ch.data.datasets.forEach((d,i)=>{d.data=sampled.map(fns[i]);});
+  ch.data.datasets.forEach((d,i)=>{d.data=sampled.map(fns[i]||(() => null));});
   ch.update('none');
 }
 
@@ -483,6 +472,15 @@ function sessCard(s){
   const tag = isBow   ? `<span class="tag tag-bow">BOW</span>`
             : isFood  ? `<span class="tag tag-food">FOOD</span>`
                       : `<span class="tag tag-water">WATER</span>`;
+
+  // sessionType badge — สีตาม type ช่วย labeler รู้ก่อนว่า firmware classify ว่าอะไร
+  const stColors = {Eating:'#22c55e',Play:'#a78bfa',FoodAdded:'#60a5fa',
+                    BowlLifted:'#f97316',FoodRemoved:'#ef4444'};
+  const stLabel = s.sessionType || '';
+  const stBadge = stLabel
+    ? `<span style="background:${stColors[stLabel]||'#555'};color:#fff;padding:1px 7px;border-radius:10px;font-size:11px;margin-left:6px">${stLabel}</span>`
+    : '';
+
   const peakLabel = isWater ? `drop <b>${s.peak}g</b>` : `peak <b>${s.peak}g</b>`;
 
   const bowSection=`
@@ -518,14 +516,14 @@ function sessCard(s){
     <div class="btns">
       <button class="b-eat" onclick="label(${id},'EATING')">🍽 Eating</button>
       <button class="b-snf" onclick="labelDirect(${id},'SNIFFING')">👃 Sniffing</button>
-      <button class="b-vis" onclick="labelDirect(${id},'VISIT')">👁 Visit</button>
-      <button class="b-fx"  onclick="labelDirect(${id},'FALSE')">✕ False</button>
+      <button class="b-v"   onclick="labelDirect(${id},'VISIT')">👁 Visit</button>
+      <button class="b-x"   onclick="labelDirect(${id},'FALSE')">✕ False</button>
     </div>
     <div class="grp-label">🧑 Owner</div>
     <div class="btns">
       <button class="b-ff"  onclick="labelDirect(${id},'FILL_FOOD')">🥣 Fill Food</button>
-      <button class="b-rb2" onclick="labelDirect(${id},'REMOVE_BOWL')">📤 Remove Bowl</button>
-      <button class="b-pb2" onclick="labelDirect(${id},'PLACE_BOWL')">📥 Place Bowl</button>
+      <button class="b-rb"  onclick="labelDirect(${id},'REMOVE_BOWL')">📤 Remove Bowl</button>
+      <button class="b-pb"  onclick="labelDirect(${id},'PLACE_BOWL')">📥 Place Bowl</button>
     </div>
     <div class="beh-wrap" id="beh${id}">
       <div class="beh-label">Eating Style</div>
@@ -541,14 +539,14 @@ function sessCard(s){
     <div class="btns">
       <button class="b-drk" onclick="label(${id},'DRINKING')">💧 Drinking</button>
       <button class="b-snw" onclick="labelDirect(${id},'SNIFFING')">👃 Sniffing</button>
-      <button class="b-vis" onclick="labelDirect(${id},'VISIT')">👁 Visit</button>
-      <button class="b-fx"  onclick="labelDirect(${id},'FALSE')">✕ False</button>
+      <button class="b-v"   onclick="labelDirect(${id},'VISIT')">👁 Visit</button>
+      <button class="b-x"   onclick="labelDirect(${id},'FALSE')">✕ False</button>
     </div>
     <div class="grp-label">🧑 Owner</div>
     <div class="btns">
       <button class="b-fw"  onclick="labelDirect(${id},'FILL_WATER')">🪣 Fill Water</button>
-      <button class="b-rw"  onclick="labelDirect(${id},'REMOVE_BOWL')">📤 Remove Bowl</button>
-      <button class="b-pw"  onclick="labelDirect(${id},'PLACE_BOWL')">📥 Place Bowl</button>
+      <button class="b-rb"  onclick="labelDirect(${id},'REMOVE_BOWL')">📤 Remove Bowl</button>
+      <button class="b-pb"  onclick="labelDirect(${id},'PLACE_BOWL')">📥 Place Bowl</button>
     </div>
     <div class="beh-wrap" id="beh${id}">
       <div class="beh-label">Drinking Style</div>
@@ -580,7 +578,7 @@ function sessCard(s){
 
   return `<div class="sess${sessClass}" id="s${id}">
     <div class="meta">
-      <span class="time">${timeStr}</span>&nbsp;${tag}&nbsp;
+      <span class="time">${timeStr}</span>&nbsp;${tag}${stBadge}&nbsp;
       <span class="info">${dateStr} &nbsp;·&nbsp; ${dur_s}s &nbsp;·&nbsp; ${peakLabel} &nbsp;·&nbsp; ${s.pointCount||0}pts${s.catId?` &nbsp;·&nbsp; cat#${s.catId}`:''}</span>
     </div>
     ${extraMeta ? `<div style="font-size:.78em;margin:4px 0 6px;line-height:1.6">${extraMeta}</div>` : ''}
@@ -608,8 +606,11 @@ function _save(id, activity, behavior, notes){
   fetch('/api/label',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({id, activity, behavior, notes})})
     .then(r=>r.json()).then(d=>{
-      if(d.ok){ lastPendCount=-1; document.getElementById('s'+id)?.remove(); }
-      else alert('Error: '+d.error);
+      if(d.ok){
+        lastPendCount=-1;
+        document.getElementById('s'+id)?.remove();
+        delete pending_activity[id];
+      } else alert('Error: '+d.error);
     });
 }
 function skip(id){
@@ -617,6 +618,7 @@ function skip(id){
     body:JSON.stringify({id})}).then(()=>{
       lastPendCount=-1;
       document.getElementById('s'+id)?.remove();
+      delete pending_activity[id];
     });
 }
 function deleteSess(id){
@@ -630,7 +632,7 @@ function viewSession(id, pad, timeStr){
   fetch(`/api/session_data?id=${id}`).then(r=>r.json()).then(pts=>{
     if(!pts.length){alert('No raw data for this session');return;}
     const isFood=pad==='food', isWater=pad==='water';
-    setChart(cW, pts,[p=>p.tot, isFood?p=>p.fl:isWater?p=>p.fl:p=>null]);
+    setChart(cW, pts,[p=>p.tot, isFood?p=>p.fl:null]);
     setChart(cC, pts,[p=>p.fl,  p=>p.fr, p=>p.rl, p=>p.rr]);
     setChart(cS, pts,[p=>p.dw,  p=>p.std]);
     setChartSrc(pad);
@@ -670,7 +672,7 @@ async function poll(){
 
     const done=s.labeled||[];
     document.getElementById('doneList').innerHTML=done.slice().reverse().map(l=>
-      `<div>✓ <b>[${l.device}]</b> <b>${l.activity}</b>${l.behavior?' ('+l.behavior+')':''} &nbsp;${l.duration_s}s &nbsp;<span style="color:#333">${l.labeled_at}</span></div>`
+      `<div>✓ <b>[${l.padType}]</b> <b>${l.activity}</b>${l.behavior?' ('+l.behavior+')':''} &nbsp;${l.duration_s}s &nbsp;<span style="color:#333">${l.labeled_at}</span></div>`
     ).join('');
   }catch(e){
     errN++;
