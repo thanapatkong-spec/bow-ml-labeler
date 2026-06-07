@@ -307,6 +307,8 @@ button:hover{opacity:.85;transform:translateY(-1px)}
 .b-nor {background:#1a237e;color:#c5cae9;padding:6px 12px}
 .b-rst {background:#7f1010;color:#ffcdd2;padding:6px 12px}
 .b-dif {background:#7a3500;color:#ffe0b2;padding:6px 12px}
+.b-str {background:#4a0000;color:#ff8a80;padding:6px 10px}
+.b-rst2{background:#1a1a2e;color:#90caf9;padding:6px 10px}
 .b-lng {background:#0d3050;color:#80deea;padding:6px 12px}
 .b-shrt{background:#1e2a1e;color:#a5d6a7;padding:6px 12px}
 .b-skip{background:#1a1a1a;color:#555;padding:4px 10px;font-size:.75em}
@@ -369,10 +371,12 @@ input.note-input:focus{outline:none;border-color:#4fc3f7;color:#ddd}
         <span style="font-size:.75em;color:#444" id="lastFetch"></span>
       </div>
       <div class="filter-bar">
-        <button class="f-btn active-all" id="fAll"   onclick="setFilter('all')">All</button>
-        <button class="f-btn"            id="fBow"   onclick="setFilter('bow')">🚽 BOW</button>
-        <button class="f-btn"            id="fFood"  onclick="setFilter('food')">🍲 FOOD</button>
-        <button class="f-btn"            id="fWater" onclick="setFilter('water')">💧 WATER</button>
+        <button class="f-btn active-all" id="fAll"      onclick="setFilter('all')">All</button>
+        <button class="f-btn"            id="fBow"      onclick="setFilter('bow')">🚽 BOW</button>
+        <button class="f-btn"            id="fFood"     onclick="setFilter('food')">🍲 FOOD</button>
+        <button class="f-btn"            id="fWater"    onclick="setFilter('water')">💧 WATER</button>
+        <button class="f-btn"            id="fSleeping" onclick="setFilter('sleeping')" style="background:#1a2a0a;border-color:#4a5a2a;color:#c5e1a5">😴 SLEEP</button>
+        <button class="f-btn"            id="fMaint"    onclick="setFilter('maintenance')" style="background:#0a1a2a;border-color:#2a4a5a;color:#80deea">🧹 Maint</button>
       </div>
       <div id="pendList" style="max-height:60vh;overflow-y:auto;padding-right:3px"></div>
     </div>
@@ -445,20 +449,43 @@ function setChart(ch,pts,fns){
   ch.update('none');
 }
 
+// Maintenance activity keywords
+const MAINT_ACTIVITIES = ['Waste Removed','Litter Box Removed','Sand Added','Litter Box Placed',
+                          'MAINTENANCE','WASTE_REMOVED','SAND_ADDED','PLACE_BOX'];
+
 function setFilter(f){
   filterMode=f;
-  ['All','Bow','Food','Water'].forEach(x=>{
-    const el=document.getElementById('f'+x);
-    const key=x.toLowerCase();
-    el.className='f-btn'+(f===key?' active-'+key:(f==='all'&&x==='All'?' active-all':''));
+  // reset all filter button styles
+  const btnMap={
+    'all':      {id:'fAll',    cls:'active-all'},
+    'bow':      {id:'fBow',    cls:'active-bow'},
+    'food':     {id:'fFood',   cls:'active-food'},
+    'water':    {id:'fWater',  cls:'active-water'},
+    'sleeping': {id:'fSleeping',cls:'active-all'},
+    'maintenance':{id:'fMaint',cls:'active-all'},
+  };
+  Object.entries(btnMap).forEach(([key,{id,cls}])=>{
+    const el=document.getElementById(id);
+    if(!el) return;
+    el.className='f-btn'+(f===key?' '+cls:'');
   });
   renderPending(allPending);
+}
+
+function _matchFilter(s){
+  if(filterMode==='all') return true;
+  if(filterMode==='bow'||filterMode==='food'||filterMode==='water') return s.padType===filterMode;
+  const act=(s.activity||'').toLowerCase();
+  if(filterMode==='sleeping') return act.includes('sleep') || act==='force close';
+  if(filterMode==='maintenance') return MAINT_ACTIVITIES.some(m=>
+    (s.activity||'').toLowerCase().includes(m.toLowerCase()));
+  return true;
 }
 
 function renderPending(sessions){
   allPending=sessions;
   document.getElementById('pCount').textContent=sessions.length;
-  const filtered=filterMode==='all'?sessions:sessions.filter(s=>s.padType===filterMode);
+  const filtered=sessions.filter(_matchFilter);
   const pl=document.getElementById('pendList');
   const groups={};
   filtered.forEach(s=>{const d=s.start.slice(0,10);if(!groups[d])groups[d]=[];groups[d].push(s);});
@@ -489,6 +516,25 @@ function sessCard(s){
     ? `<span style="background:${stColors[stLabel]||'#555'};color:#fff;padding:1px 7px;border-radius:10px;font-size:11px;margin-left:6px">${stLabel}</span>`
     : '';
 
+  // activity badge — แสดง firmware activity สำหรับ bow sessions
+  // ช่วย labeler รู้ว่า firmware classify เป็นอะไรก่อน review
+  const actColors = {
+    'SLEEPING':           {bg:'#1a2a0a',color:'#c5e1a5',border:'#4a5a2a'},
+    'sleeping':           {bg:'#1a2a0a',color:'#c5e1a5',border:'#4a5a2a'},
+    'Force Close':        {bg:'#2a1a0a',color:'#ffcc80',border:'#5a3a1a'},
+    'Just Visiting':      {bg:'#0a1a2a',color:'#80deea',border:'#2a4a5a'},
+    'URINE OR FECES':     {bg:'#2a0a2a',color:'#ce93d8',border:'#5a2a5a'},
+    'Waste Removed':      {bg:'#0a1a0a',color:'#a5d6a7',border:'#2a4a2a'},
+    'Litter Box Removed': {bg:'#2a0a0a',color:'#ef9a9a',border:'#5a2a2a'},
+    'Sand Added':         {bg:'#1a1a0a',color:'#fff176',border:'#4a4a1a'},
+    'Litter Box Placed':  {bg:'#0a1a1a',color:'#80deea',border:'#2a4a4a'},
+  };
+  const actLabel = isBow && s.activity ? s.activity : '';
+  const actStyle = actColors[actLabel];
+  const actBadge = actLabel && actStyle
+    ? `<span style="background:${actStyle.bg};color:${actStyle.color};border:1px solid ${actStyle.border};padding:1px 8px;border-radius:10px;font-size:11px;margin-left:6px;font-weight:700">${actLabel}</span>`
+    : '';
+
   const peakLabel = isWater ? `drop <b>${s.peak}g</b>` : `peak <b>${s.peak}g</b>`;
 
   const bowSection=`
@@ -498,10 +544,12 @@ function sessCard(s){
       <button class="b-f"  onclick="label(${id},'FECES')">💩 Feces</button>
       <button class="b-uf" onclick="label(${id},'URINE+FECES')">💧💩 Both</button>
       <button class="b-g"  onclick="label(${id},'GROOMING')">🐱 Groom</button>
-      <button class="b-sl" onclick="labelDirect(${id},'SLEEP')">😴 Sleep</button>
-      <button class="b-v"  onclick="labelDirect(${id},'VISIT')">👁 Visit</button>
-      <button class="b-dg" onclick="labelDirect(${id},'DIG')">🏖 Dig</button>
-      <button class="b-x"  onclick="labelDirect(${id},'FALSE')">✕ False</button>
+      <button class="b-sl"   onclick="labelDirect(${id},'SLEEP')">😴 Sleep</button>
+      <button class="b-v"    onclick="labelDirect(${id},'VISIT')">👁 Visit</button>
+      <button class="b-dg"   onclick="labelDirect(${id},'DIG')">🏖 Dig</button>
+      <button class="b-str"  onclick="labelDirect(${id},'STRAINING')" title="เบ่งแต่ไม่ออก — สัญญาณ FLUTD">⚠ Strain</button>
+      <button class="b-rst2" onclick="labelDirect(${id},'RESTING')"   title="นั่งนิ่งบน pad ไม่ใช่ elimination">🪑 Rest</button>
+      <button class="b-x"    onclick="labelDirect(${id},'FALSE')">✕ False</button>
     </div>
     <div class="grp-label">🧑 Owner</div>
     <div class="btns">
@@ -568,12 +616,13 @@ function sessCard(s){
   const sessClass = isBow ? '' : isFood ? ' food-sess' : ' water-sess';
 
   // Activity / metadata / sessionId meta line
+  // Note: bow activity is shown as actBadge in the card header — not repeated here
   let extraMeta = '';
   if (s.activity) {
-    extraMeta += `<span style="color:#aaa">🏷 ${s.activity}</span>`;
+    if (!isBow) extraMeta += `<span style="color:#aaa">🏷 ${s.activity}</span>`;
     if (isBow) {
-      if (s.weight_g != null && s.weight_g > 0) extraMeta += ` &nbsp;·&nbsp; <span style="color:#81c784">🐱 ${s.weight_g}g</span>`;
-      if (s.waste_g  != null && s.waste_g  > 0) extraMeta += ` &nbsp;·&nbsp; <span style="color:#ffb74d">💩 ${s.waste_g}g</span>`;
+      if (s.weight_g != null && s.weight_g > 0) extraMeta += `<span style="color:#81c784">🐱 ${s.weight_g}g</span>`;
+      if (s.waste_g  != null && s.waste_g  > 0) extraMeta += `${extraMeta?' &nbsp;·&nbsp; ':''}<span style="color:#ffb74d">💩 ${s.waste_g}g</span>`;
     }
     if (isFood) {
       if (s.catWeight_g    != null && s.catWeight_g    > 0) extraMeta += ` &nbsp;·&nbsp; <span style="color:#81c784">🐱 ${s.catWeight_g}g</span>`;
@@ -586,7 +635,7 @@ function sessCard(s){
 
   return `<div class="sess${sessClass}" id="s${id}">
     <div class="meta">
-      <span class="time">${timeStr}</span>&nbsp;${tag}${stBadge}&nbsp;
+      <span class="time">${timeStr}</span>&nbsp;${tag}${stBadge}${actBadge}&nbsp;
       <span class="info">${dateStr} &nbsp;·&nbsp; ${dur_s}s &nbsp;·&nbsp; ${peakLabel} &nbsp;·&nbsp; ${s.pointCount||0}pts${s.catId?` &nbsp;·&nbsp; cat#${s.catId}`:''}</span>
     </div>
     ${extraMeta ? `<div style="font-size:.78em;margin:4px 0 6px;line-height:1.6">${extraMeta}</div>` : ''}
