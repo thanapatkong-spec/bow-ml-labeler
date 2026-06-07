@@ -148,12 +148,18 @@ PATCH /api/sense-pad/raw-sessions/:id/label
 POLL_INTERVAL = 6    # วินาที
 FETCH_LIMIT   = 100  # sessions ต่อครั้ง
 
-# ทุกรอบ poll:
-# 1. sessions_cache[id] = sess  ← อัปเดตทุกรอบเสมอ (รวม metadata ใหม่)
-# 2. ถ้า id ไม่อยู่ใน pending → append ใหม่
-# 3. ถ้า id อยู่ใน pending อยู่แล้ว → อัปเดต activity/weight_g/waste_g/peak
+# ทุกรอบ poll (sync กับ DB):
+# 1. fetched_ids = set ของ id ทั้งหมดที่ DB คืนมา
+# 2. pending[:] = [s for s in pending if s["id"] in fetched_ids]
+#    → ลบ session ที่ถูก delete/label/skip ใน DB ออกจาก memory ทันที
+#    → ไม่ต้อง restart process เมื่อลบข้อมูลจาก DB
+# 3. sessions_cache[id] = sess  ← อัปเดตทุกรอบเสมอ (รวม metadata ใหม่)
+# 4. ถ้า id ไม่อยู่ใน pending → append ใหม่
+# 5. ถ้า id อยู่ใน pending อยู่แล้ว → อัปเดต activity/weight_g/waste_g/peak
 #    (สำคัญ: metadata อาจมาทีหลังถ้า backend deploy ใหม่)
 ```
+
+**กฎ:** ห้ามแก้ poll ให้กลับไปเพิ่มอย่างเดียว — การ sync ออกด้วยเป็น requirement หลัก
 
 ---
 
