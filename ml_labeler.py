@@ -63,6 +63,14 @@ def _fetch_railway():
             railway_ok[0] = True
 
             with lock:
+                # Sync pending[] กับ DB — ลบ session ที่หายไปจาก DB ออกจาก memory
+                fetched_ids = {sess["id"] for sess in data}
+                removed = [s["id"] for s in pending if s["id"] not in fetched_ids]
+                if removed:
+                    pending[:] = [s for s in pending if s["id"] in fetched_ids]
+                    for rid in removed:
+                        sessions_cache.pop(rid, None)
+
                 existing_ids = {s["id"]: i for i, s in enumerate(pending)}
                 for sess in data:
                     sid = sess["id"]
