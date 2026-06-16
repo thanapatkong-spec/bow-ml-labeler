@@ -18,8 +18,8 @@ from flask import Flask, jsonify, request, Response
 # ── Config ────────────────────────────────────────────────────────────────────
 RAILWAY_URL   = os.environ.get("RAILWAY_URL", "https://bow-iot-backend-production.up.railway.app")
 HTTP_PORT     = int(os.environ.get("PORT", 8080))
-POLL_INTERVAL = 6   # seconds between Railway fetches
-FETCH_LIMIT   = 100
+POLL_INTERVAL = 20  # seconds between Railway fetches (was 6 — list no longer carries points, but still no need to hammer)
+FETCH_LIMIT   = 50  # was 100 — fewer rows per poll since most are never opened
 
 ACCESS_USER = os.environ.get("ACCESS_USER", "bow")
 ACCESS_PASS = os.environ.get("ACCESS_PASS", "")   # ถ้าไม่ set = ไม่มี auth (local mode)
@@ -204,12 +204,23 @@ def api_skip():
 @require_auth
 def api_session_data():
     sess_id = request.args.get("id", type=int)
-    with lock:
-        sess = sessions_cache.get(sess_id)
-    if not sess:
-        return jsonify([])
 
-    raw = sess.get("points") or []
+    # points ไม่อยู่ใน polling list อีกแล้ว (ลด network egress) — ดึงแยกตอนกด View
+    with lock:
+        raw = sessions_cache.get(sess_id, {}).get("points")
+
+    if raw is None:
+        try:
+            r = requests.get(f"{RAILWAY_URL}/api/sense-pad/raw-sessions/{sess_id}", timeout=10)
+            r.raise_for_status()
+            raw = r.json().get("points") or []
+        except Exception as e:
+            print(f"[SESSION_DATA] fetch error: {e}")
+            return jsonify([])
+        with lock:
+            if sess_id in sessions_cache:
+                sessions_cache[sess_id]["points"] = raw  # cache เผื่อกด View ซ้ำ session เดียวกัน
+
     result = []
     for p in raw:
         if isinstance(p, list):
